@@ -182,3 +182,6 @@ end $$;
 grant execute on function gw_login(text, text), gw_data(uuid, text), gw_weighin(uuid, text, int, numeric),
   gw_set_pin(uuid, text, text), gw_shout(uuid, text, uuid, text), gw_react(uuid, text, uuid, text),
   gw_admin_has(), gw_admin_set(text), gw_admin(text, text, jsonb) to anon, authenticated;
+
+-- Tell the Supabase API to pick up the new functions right away.
+notify pgrst, 'reload schema';
