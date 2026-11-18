@@ -14,6 +14,8 @@ create table if not exists gw_participants (
   pin_hash text not null,
   created_at timestamptz not null default now()
 );
+-- Each person chooses whether others can see their actual weight (default: private).
+alter table gw_participants add column if not exists show_weight boolean not null default false;
 create unique index if not exists gw_participants_name_key on gw_participants (lower(name));
 
 create table if not exists gw_weighins (
@@ -56,7 +58,7 @@ $$;
 create or replace function gw_snapshot() returns json
 language sql stable security definer set search_path = public as $$
   select json_build_object(
-    'users', coalesce((select json_agg(json_build_object('id', id, 'name', name, 'track', track, 'active', active) order by created_at) from gw_participants), '[]'),
+    'users', coalesce((select json_agg(json_build_object('id', id, 'name', name, 'track', track, 'active', active, 'showWeight', show_weight) order by created_at) from gw_participants), '[]'),
     'weighins', coalesce((select json_agg(json_build_object('id', id, 'userId', user_id, 'week', week, 'weight', weight, 'at', at)) from gw_weighins), '[]'),
     'shouts', coalesce((select json_agg(json_build_object('id', id, 'fromId', from_id, 'toId', to_id, 'text', text, 'at', at, 'reactions', reactions)) from gw_shouts), '[]')
   );
@@ -69,7 +71,7 @@ create or replace function gw_login(p_name text, p_hash text) returns json
 language plpgsql security definer set search_path = public as $$
 declare r json;
 begin
-  select json_build_object('id', id, 'name', name, 'track', track, 'active', active) into r
+  select json_build_object('id', id, 'name', name, 'track', track, 'active', active, 'showWeight', show_weight) into r
   from gw_participants where lower(name) = lower(trim(p_name)) and pin_hash = p_hash and active;
   if r is null then raise exception 'Name or PIN didn''t match'; end if;
   return r;
@@ -95,6 +97,13 @@ language plpgsql security definer set search_path = public as $$
 begin
   if not gw_auth(p_uid, p_hash) then raise exception 'Please log in again'; end if;
   update gw_participants set pin_hash = p_new where id = p_uid;
+end $$;
+
+create or replace function gw_set_privacy(p_uid uuid, p_hash text, p_show boolean) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not gw_auth(p_uid, p_hash) then raise exception 'Please log in again'; end if;
+  update gw_participants set show_weight = p_show where id = p_uid;
 end $$;
 
 create or replace function gw_shout(p_uid uuid, p_hash text, p_to uuid, p_text text) returns void
@@ -142,7 +151,7 @@ begin
     begin
       insert into gw_participants (name, track, pin_hash)
       values (trim(p_args ->> 'name'), coalesce(p_args ->> 'track', 'lose'), p_args ->> 'pinHash')
-      returning json_build_object('id', id, 'name', name, 'track', track, 'active', active) into r;
+      returning json_build_object('id', id, 'name', name, 'track', track, 'active', active, 'showWeight', show_weight) into r;
     exception when unique_violation then raise exception 'That name is taken';
     end;
     return r;
@@ -151,7 +160,8 @@ begin
       name = coalesce(p_args ->> 'name', name),
       track = coalesce(p_args ->> 'track', track),
       active = coalesce((p_args ->> 'active')::boolean, active),
-      pin_hash = coalesce(p_args ->> 'pinHash', pin_hash)
+      pin_hash = coalesce(p_args ->> 'pinHash', pin_hash),
+      show_weight = coalesce((p_args ->> 'showWeight')::boolean, show_weight)
     where id = (p_args ->> 'id')::uuid;
   when 'upsert_weighin' then
     insert into gw_weighins (user_id, week, weight)
@@ -161,12 +171,12 @@ begin
   when 'delete_shout' then delete from gw_shouts where id = (p_args ->> 'id')::uuid;
   when 'export' then
     return json_build_object(
-      'users', coalesce((select json_agg(json_build_object('id', id, 'name', name, 'track', track, 'active', active, 'pinHash', pin_hash) order by created_at) from gw_participants), '[]'),
+      'users', coalesce((select json_agg(json_build_object('id', id, 'name', name, 'track', track, 'active', active, 'showWeight', show_weight, 'pinHash', pin_hash) order by created_at) from gw_participants), '[]'),
       'weighins', (gw_snapshot() -> 'weighins'), 'shouts', (gw_snapshot() -> 'shouts'));
   when 'import' then
     delete from gw_shouts; delete from gw_weighins; delete from gw_participants;
-    insert into gw_participants (id, name, track, active, pin_hash)
-      select (u ->> 'id')::uuid, u ->> 'name', u ->> 'track', coalesce((u ->> 'active')::boolean, true), u ->> 'pinHash'
+    insert into gw_participants (id, name, track, active, pin_hash, show_weight)
+      select (u ->> 'id')::uuid, u ->> 'name', u ->> 'track', coalesce((u ->> 'active')::boolean, true), u ->> 'pinHash', coalesce((u ->> 'showWeight')::boolean, false)
       from jsonb_array_elements(p_args -> 'users') u;
     insert into gw_weighins (id, user_id, week, weight, at)
       select (w ->> 'id')::uuid, (w ->> 'userId')::uuid, (w ->> 'week')::int, (w ->> 'weight')::numeric, coalesce((w ->> 'at')::timestamptz, now())
@@ -180,7 +190,7 @@ begin
 end $$;
 
 grant execute on function gw_login(text, text), gw_data(uuid, text), gw_weighin(uuid, text, int, numeric),
-  gw_set_pin(uuid, text, text), gw_shout(uuid, text, uuid, text), gw_react(uuid, text, uuid, text),
+  gw_set_pin(uuid, text, text), gw_set_privacy(uuid, text, boolean), gw_shout(uuid, text, uuid, text), gw_react(uuid, text, uuid, text),
   gw_admin_has(), gw_admin_set(text), gw_admin(text, text, jsonb) to anon, authenticated;
 
 -- Tell the Supabase API to pick up the new functions right away.

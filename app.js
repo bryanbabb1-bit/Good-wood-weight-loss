@@ -45,6 +45,8 @@
     scale: '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M8 8.5a6 6 0 0 1 8 0l-2.5 3a2 2 0 0 0-3 0L8 8.5Z"/>',
     sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/>',
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
+    eye: '<path d="M2 12s3-8 10-8 10 8 10 8-3 8-10 8-10-8-10-8Z"/><circle cx="12" cy="12" r="3"/>',
+    lock: '<rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
     eyeOff: '<path d="M9.9 4.24A9 9 0 0 1 12 4c7 0 10 8 10 8a13.2 13.2 0 0 1-1.67 2.68M6.61 6.61A13.5 13.5 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.39-1.61"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24M2 2l20 20"/>',
   };
   const icon = (name, cls = "") => `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ""}</svg>`;
@@ -279,12 +281,75 @@
     const u = state.me;
     await sheet({
       title: `<div class="row" style="gap:14px">${avatar(u, "lg")}<div><div>${esc(u.name)}</div><div class="eyebrow" style="margin-top:4px">${trackName(u.track)} track</div></div></div>`,
-      body: `<button type="button" class="menu-item" id="mPin">${icon("key")}Change PIN</button><button type="button" class="menu-item danger" id="mOut">${icon("logout")}Log out</button>`,
+      body: `${switchRow(!!u.showWeight, "Share my weight", privacySub(!!u.showWeight))}
+        <button type="button" class="menu-item" id="mPin">${icon("key")}Change PIN</button><button type="button" class="menu-item danger" id="mOut">${icon("logout")}Log out</button>`,
       actions: [{ label: "Close" }],
       onMount: (el, close) => {
+        bindPrivacySwitch(el);
         $("#mPin", el).onclick = () => { close(null); setTimeout(changePin, 320); };
         $("#mOut", el).onclick = () => { close(null); localStorage.removeItem(SESSION); S.logout && S.logout(); state.me = null; state.tab = "me"; render(); };
       },
+    });
+  }
+
+  // ---------- weight privacy ----------
+  const canSeeWeight = (u) => !!u && (u.showWeight || (state.me && u.id === state.me.id) || state.admin);
+  const switchRow = (checked, title, sub) => `<label class="switch-row"><div><div class="sw-title">${title}</div><div class="sw-sub">${sub}</div></div><span class="switch"><input type="checkbox" name="show" ${checked ? "checked" : ""}><i></i></span></label>`;
+  const privacySub = (on) => on ? "Everyone can see your actual weight on your profile and in Ranks." : "Others see only your % and lbs changed. Your actual weight stays with you and the commissioner.";
+
+  function bindPrivacySwitch(el) {
+    const cb = $("input[name=show]", el); if (!cb) return;
+    cb.onchange = async () => {
+      haptic();
+      const on = cb.checked;
+      $(".sw-sub", el).textContent = privacySub(on);
+      try { await S.setPrivacy(state.me.id, on); await refresh(); toast(on ? "Your weight is now visible to the group" : "Your weight is now private"); render(); }
+      catch (e) { cb.checked = !on; $(".sw-sub", el).textContent = privacySub(!on); toast(e.message, "err"); }
+    };
+  }
+
+  function privacySheet() {
+    const on = !!state.me.showWeight;
+    return sheet({
+      title: "Weight privacy",
+      desc: "Choose whether the group can see your actual weight. Rankings always use % change either way.",
+      body: switchRow(on, "Share my weight", privacySub(on)),
+      actions: [{ label: "Done" }],
+      onMount: bindPrivacySwitch,
+    });
+  }
+
+  function personSheet(u) {
+    const p = personStats(u);
+    const see = canSeeWeight(u);
+    const first = esc(u.name.split(/\s+/)[0]);
+    const cw = currentWeek();
+    const n = Math.max(cw, p.latestWeek || 0);
+    const weights = [], pcts = [];
+    for (let w = 0; w <= n; w++) {
+      const e = p.entries.find((x) => x.week === w);
+      weights.push(e ? e.weight : null);
+      pcts.push(e && p.hasStart ? ((e.weight - p.start) / p.start) * 100 : null);
+    }
+    const board = ranked(u.track, "all");
+    const rk = board.findIndex((x) => x.user.id === u.id);
+    return sheet({
+      title: `<div class="row" style="gap:14px">${avatar(u, "lg")}<div><div>${esc(u.name)}</div><div class="eyebrow" style="margin-top:4px">${trackName(u.track)} track${rk >= 0 ? ` · Rank ${rk + 1} of ${board.length}` : ""}</div></div></div>`,
+      body: p.hasStart ? `
+        <div class="tiles">
+          <div class="tile"><div class="eyebrow">Total</div><b class="num ${tone(p.score, p.pct)}">${signed(p.pct)}<small>%</small></b></div>
+          <div class="tile"><div class="eyebrow">Change</div><b class="num">${signed(p.change)}<small>lb</small></b></div>
+          <div class="tile"><div class="eyebrow">Streak</div><b class="num">${p.streak}<small>wk</small></b></div>
+        </div>
+        ${see ? `<div class="tiles" style="grid-template-columns:1fr 1fr;margin-top:10px">
+          <div class="tile"><div class="eyebrow">Start</div><b class="num">${fmt1(p.start)}<small>lb</small></b></div>
+          <div class="tile"><div class="eyebrow">Current</div><b class="num">${fmt1(p.latest)}<small>lb</small></b></div>
+        </div>` : ""}
+        <div class="eyebrow" style="margin:18px 0 8px">${see ? "Weight trend" : "% change trend"}</div>
+        <div class="${u.track === "gain" ? "scope-gain" : "scope-lose"}">${see ? areaChart(weights, { id: "ps" }) : areaChart(pcts, { id: "ps", unit: "%" })}</div>
+        ${see ? "" : `<p class="note">${icon("lock", "sm")}${first} keeps their actual weight private.</p>`}`
+        : `<div class="empty"><span class="icon-btn">${icon("scale")}</span>${first} hasn't logged a starting weight yet.</div>`,
+      actions: [{ label: "Close" }],
     });
   }
 
@@ -403,7 +468,7 @@
         ${areaChart(points, { id: "meC" })}
       </section>
       <section class="card" style="--i:6">
-        <div class="card-head"><div class="card-title">History</div><span class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px">${icon("eyeOff", "sm")}Private</span></div>
+        <div class="card-head"><div class="card-title">History</div><button type="button" id="privBtn" class="pill ${u.showWeight ? "accent" : ""}">${icon(u.showWeight ? "eye" : "lock", "sm")}${u.showWeight ? "Shared" : "Private"}</button></div>
         <ul class="list">
           ${p.entries.slice().reverse().map((e) => {
             const prev = weightAt(p.entries, e.week - 1);
@@ -415,6 +480,7 @@
       </section>` : ""}
     </div>`;
 
+    const pb = $("#privBtn"); if (pb) pb.onclick = privacySheet;
     const input = $("input[name=weight]");
     $$("[data-step]").forEach((b) => (b.onclick = () => {
       const base = parseFloat(input.value) || parseFloat(input.placeholder) || 0;
@@ -447,12 +513,13 @@
     const maxAbs = Math.max(...rows.map((r) => Math.abs(r.pct)), 0.1);
     const podium = rows.length >= 3 ? rows.slice(0, 3) : [];
     const rest = podium.length ? rows.slice(3) : rows;
-    const row = (r, i) => `<div class="rank-row ${r.user.id === state.me.id ? "me" : ""}">
+    const wtag = (u) => { const ps = personStats(u); return canSeeWeight(u) && ps.hasStart ? `<span class="wt num">${fmt1(ps.latest)} lb</span>` : `<span class="wt" aria-label="Weight private">${icon("lock", "sm")}</span>`; };
+    const row = (r, i) => `<div class="rank-row tap ${r.user.id === state.me.id ? "me" : ""}" data-person="${r.user.id}" role="button" tabindex="0">
         <span class="rk">${String(i + 1).padStart(2, "0")}</span>${avatar(r.user)}
-        <div style="min-width:0"><div class="nm">${esc(r.user.name)}</div><div class="meter"><i class="${r.score < 0 && Math.abs(r.pct) >= 0.05 ? "neg" : ""}" style="width:${Math.max(4, (Math.abs(r.pct) / maxAbs) * 100)}%"></i></div></div>
+        <div style="min-width:0"><div class="nm-row"><span class="nm">${esc(r.user.name)}</span>${wtag(r.user)}</div><div class="meter"><i class="${r.score < 0 && Math.abs(r.pct) >= 0.05 ? "neg" : ""}" style="width:${Math.max(4, (Math.abs(r.pct) / maxAbs) * 100)}%"></i></div></div>
         <div class="v"><b class="num ${tone(r.score, r.pct)}">${signed(r.pct, "%")}</b><small class="num">${signed(r.change, " lb")}</small></div>
       </div>`;
-    const pod = (r, place, i) => r ? `<div class="pod p${place}" style="--i:${i}">${avatar(r.user, place === 1 ? "lg" : "")}<div class="nm">${esc(r.user.name)}</div><div class="pc num ${tone(r.score, r.pct)}">${signed(r.pct, "%")}</div><div class="base">${place}</div></div>` : "";
+    const pod = (r, place, i) => r ? `<div class="pod tap p${place}" style="--i:${i}" data-person="${r.user.id}" role="button" tabindex="0">${avatar(r.user, place === 1 ? "lg" : "")}<div class="nm">${esc(r.user.name)}</div><div class="pc num ${tone(r.score, r.pct)}">${signed(r.pct, "%")}</div><div class="base">${place}</div></div>` : "";
 
     $app.innerHTML = `<div class="stack">
       <section class="card" style="--i:0">
@@ -471,9 +538,10 @@
           ${podium.length ? `<div class="podium">${pod(podium[1], 2, 1)}${pod(podium[0], 1, 0)}${pod(podium[2], 3, 2)}</div>` : ""}
           ${rest.length ? `<div style="margin-top:${podium.length ? 16 : 0}px">${rest.map((r) => row(r, rows.indexOf(r))).join("")}</div>` : ""}
         ` : `<div class="empty"><span class="icon-btn">${icon("trophy")}</span>${wk === "all" ? "Rankings appear once starting weights are in." : "No weigh-ins for this week yet."}</div>`}
-        <p class="note">${icon("info", "sm")}Ranked by % ${track === "gain" ? "gained" : "lost"}${wk === "all" ? " since the start" : " vs. the previous weigh-in"}, so every body size competes evenly.</p>
+        <p class="note">${icon("info", "sm")}Tap anyone for their profile. Ranked by % ${track === "gain" ? "gained" : "lost"}${wk === "all" ? " since the start" : " vs. the previous weigh-in"}, so every body size competes evenly.</p>
       </section>
     </div>`;
+    $$("[data-person]").forEach((b) => (b.onclick = () => { haptic(); personSheet(userById(b.dataset.person)); }));
     $$("[data-track]").forEach((b) => (b.onclick = () => { if (state.boardTrack !== b.dataset.track) { haptic(); state.boardTrack = b.dataset.track; render(); } }));
     $$("[data-week]").forEach((b) => (b.onclick = () => { haptic(); state.boardWeek = b.dataset.week === "all" ? "all" : +b.dataset.week; render(); }));
   }
@@ -592,7 +660,7 @@
 
       <section class="card people" style="--i:2">
         <div class="card-head"><div class="card-title">Participants</div><span class="eyebrow">${activeUsers().length} active</span></div>
-        ${state.users.length ? `<ul class="list">${state.users.map((u) => `<li style="${u.active === false ? "opacity:.45" : ""}">${avatar(u)}<div class="grow"><div style="font-weight:600">${esc(u.name)}</div><div class="muted" style="font-size:12px">${trackName(u.track)} track${u.active === false ? " · removed" : ""}</div></div><button class="icon-btn" data-edit="${u.id}" aria-label="Edit ${esc(u.name)}">${icon("chevron")}</button></li>`).join("")}</ul>`
+        ${state.users.length ? `<ul class="list">${state.users.map((u) => `<li style="${u.active === false ? "opacity:.45" : ""}">${avatar(u)}<div class="grow"><div style="font-weight:600">${esc(u.name)}</div><div class="muted" style="font-size:12px">${trackName(u.track)} track · ${u.showWeight ? "weight shared" : "weight private"}${u.active === false ? " · removed" : ""}</div></div><button class="icon-btn" data-edit="${u.id}" aria-label="Edit ${esc(u.name)}">${icon("chevron")}</button></li>`).join("")}</ul>`
           : `<div class="empty"><span class="icon-btn">${icon("users")}</span>No one yet. Add your first participant above.</div>`}
       </section>
 
@@ -653,7 +721,8 @@
     const r = await sheet({
       title: `<div class="row" style="gap:14px">${avatar(u, "lg")}<div>${esc(u.name)}</div></div>`,
       body: `<label class="field"><span>Track</span><select class="input" name="track"><option value="lose" ${u.track === "lose" ? "selected" : ""}>Lose</option><option value="gain" ${u.track === "gain" ? "selected" : ""}>Gain</option></select></label>
-             <label class="field"><span>New PIN (leave blank to keep)</span><input class="input" name="pin" inputmode="numeric" pattern="[0-9]*" minlength="4" autocomplete="off"></label>`,
+             <label class="field"><span>New PIN (leave blank to keep)</span><input class="input" name="pin" inputmode="numeric" pattern="[0-9]*" minlength="4" autocomplete="off"></label>
+             <div style="margin-top:14px">${switchRow(!!u.showWeight, "Weight visible to group", "Normally each person sets this themselves.")}</div>`,
       actions: [
         { label: u.active === false ? "Restore participant" : "Remove participant", kind: u.active === false ? "ghost" : "ghost danger", value: "toggle" },
         { label: "Save changes", kind: "primary", value: "save", submit: true },
@@ -668,6 +737,7 @@
         const patch = {};
         if (r.track !== u.track) patch.track = r.track;
         if (r.pin) patch.pin = r.pin;
+        if (!!r.show !== !!u.showWeight) patch.showWeight = !!r.show;
         if (!Object.keys(patch).length) return;
         await S.updateUser(u.id, patch); toast(patch.pin ? "Saved. Share the new PIN with them." : "Saved");
       }

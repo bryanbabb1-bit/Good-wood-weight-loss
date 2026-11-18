@@ -21,7 +21,7 @@
     async addUser({ name, track, pin }) {
       const d = this.load();
       if (d.users.some((u) => u.name.toLowerCase() === name.toLowerCase())) throw new Error("That name is taken");
-      const u = { id: uid(), name, track, pinHash: await sha(pin), active: true };
+      const u = { id: uid(), name, track, pinHash: await sha(pin), active: true, showWeight: false };
       d.users.push(u); this.save(d); return u;
     }
     async updateUser(id, patch) {
@@ -65,6 +65,8 @@
     async deleteShout(id) {
       const d = this.load(); d.shouts = d.shouts.filter((x) => x.id !== id); this.save(d);
     }
+
+    async setPrivacy(id, show) { return this.updateUser(id, { showWeight: !!show }); }
 
     async hasAdmin() { return !!this.load().adminHash; }
     async setAdmin(pass) { const d = this.load(); d.adminHash = await sha("admin:" + pass); this.save(d); }
@@ -133,6 +135,7 @@
       if (patch.track) args.track = patch.track;
       if (patch.name) args.name = patch.name;
       if (typeof patch.active === "boolean") args.active = patch.active;
+      if (typeof patch.showWeight === "boolean") args.showWeight = patch.showWeight;
       if (!this.adminHash && this.cred && id === this.cred.uid && args.pinHash) {
         await this.me("gw_set_pin", { p_new: args.pinHash });
         this.cred.hash = args.pinHash;
@@ -140,6 +143,10 @@
         return;
       }
       return this.admin("update_user", args);
+    }
+    async setPrivacy(id, show) {
+      if (this.adminHash) return this.admin("update_user", { id, showWeight: !!show });
+      return this.me("gw_set_privacy", { p_show: !!show });
     }
     async upsertWeighin(userId, week, weight) {
       if (this.adminHash) return this.admin("upsert_weighin", { userId, week, weight });
