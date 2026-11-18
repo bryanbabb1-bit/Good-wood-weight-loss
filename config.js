@@ -8,7 +8,7 @@ window.GW_CONFIG = {
   showRawWeights: false,     // false = others only see % and lbs changed
   // Backend: "supabase" = shared database (needs URL + key below).
   //          "local"    = data stays in this browser only (demo/testing).
-  backend: "local",
-  supabaseUrl: "",   // e.g. https://abcdxyz.supabase.co
+  backend: "supabase",
+  supabaseUrl: "https://omljixzxjxoihuxaroap.supabase.co",   // e.g. https://abcdxyz.supabase.co
   supabaseKey: "sb_publishable_uoRUFzp0hXRj_ggB5Wf8uQ_GmnJFQK_",   // anon / publishable key (safe to be public)
 };
