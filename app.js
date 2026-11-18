@@ -161,7 +161,7 @@
     $tabs.classList.toggle("hidden", !state.me);
     $who.innerHTML = state.me ? `${esc(state.me.name)} · <a href="#" id="logout">log out</a>` : "";
     const lo = document.getElementById("logout");
-    if (lo) lo.onclick = (e) => { e.preventDefault(); localStorage.removeItem(SESSION); state.me = null; render(); };
+    if (lo) lo.onclick = (e) => { e.preventDefault(); localStorage.removeItem(SESSION); S.logout && S.logout(); state.me = null; render(); };
     $tabs.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.tab === state.tab));
 
     if (state.admin) return renderAdmin();
@@ -422,7 +422,7 @@
         ${C.backend === "local" ? `<button id="demo" class="sm">Load demo data</button> <button id="wipe" class="sm danger">Wipe all data</button>` : ""}
       </section>`;
 
-    document.getElementById("adExit").onclick = () => { state.admin = false; render(); };
+    document.getElementById("adExit").onclick = async () => { state.admin = false; S.exitAdmin && S.exitAdmin(); await refresh(); render(); };
     document.getElementById("addUser").onsubmit = async (e) => {
       e.preventDefault();
       const f = new FormData(e.target);
@@ -475,11 +475,14 @@
 
   // ---------- boot ----------
   $tabs.querySelectorAll("button").forEach((b) => (b.onclick = () => { state.tab = b.dataset.tab; render(); }));
+  window.addEventListener("unhandledrejection", (e) => toast((e.reason && e.reason.message) || "Something went wrong"));
   (async () => {
+    S.exitAdmin && S.exitAdmin();
     await refresh();
     const id = localStorage.getItem(SESSION);
     if (id) state.me = userById(id) || null;
     render();
-  })();
+  })().catch((err) => { toast(err.message); render(); });
+
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 })();

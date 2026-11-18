@@ -16,5 +16,12 @@ Edit `config.js` (start date, number of weeks, milestones).
 ## Run locally
 `python3 -m http.server` then open http://localhost:8000. Add `?today=2026-12-21` to the URL to preview a later week.
 
-## Data
-`store.js` holds the data layer. The current `LocalStore` keeps data in the browser only (for testing). A shared hosted backend plugs in behind the same methods.
+## Shared database (Supabase)
+1. Create a free project at supabase.com.
+2. SQL Editor → New query → paste all of `supabase/schema.sql` → Run.
+3. Settings → API: copy the Project URL and the anon/publishable key into `config.js`, and set `backend: "supabase"`.
+4. Open the app, tap **Commissioner**, set the passcode, and add everyone with a PIN.
+
+Tables are locked (row-level security, no direct access). The app only calls Postgres functions that check the person's PIN or the commissioner passcode. PINs and the passcode are stored hashed.
+
+With `backend: "local"` data stays in one browser, which is handy for trying things out (Commissioner → Load demo data).
