@@ -10,5 +10,5 @@ window.GW_CONFIG = {
   //          "local"    = data stays in this browser only (demo/testing).
   backend: "local",
   supabaseUrl: "",   // e.g. https://abcdxyz.supabase.co
-  supabaseKey: "",   // anon / publishable key (safe to be public)
+  supabaseKey: "sb_publishable_uoRUFzp0hXRj_ggB5Wf8uQ_GmnJFQK_",   // anon / publishable key (safe to be public)
 };
