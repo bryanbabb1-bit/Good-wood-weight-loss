@@ -1,5 +1,5 @@
 // Network-first service worker: always fresh when online, works offline from cache.
-const CACHE = "gwwlc-v2";
+const CACHE = "gwwlc-v3";
 const ASSETS = ["./", "index.html", "styles.css", "app.js", "store.js", "config.js", "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS))); self.skipWaiting(); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k))))); self.clients.claim(); });
